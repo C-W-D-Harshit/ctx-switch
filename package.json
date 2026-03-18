@@ -1,0 +1,32 @@
+{
+  "name": "cc-continue",
+  "version": "1.0.0",
+  "description": "Continue Claude Code sessions when you hit usage limits — generates a handoff prompt for Codex or other agents",
+  "main": "index.js",
+  "bin": {
+    "cc-continue": "./index.js"
+  },
+  "files": [
+    "index.js"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "codex",
+    "ai",
+    "cli",
+    "continuation",
+    "handoff",
+    "openrouter",
+    "agent"
+  ],
+  "author": "Harshit",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/C-W-D-Harshit/cc-continue"
+  }
+}
