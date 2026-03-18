@@ -408,7 +408,8 @@ async function main() {
     let apiKey = getApiKey();
     if (!apiKey) {
       console.error("No OpenRouter API key found.\n");
-      console.error("Get a free key at: https://openrouter.ai/keys\n");
+      console.error("We use the openrouter/free model — completely free, no credits needed.");
+      console.error("Get your key at: https://openrouter.ai/keys\n");
       apiKey = await promptForApiKey();
     }
 
