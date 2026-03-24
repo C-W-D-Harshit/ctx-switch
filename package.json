@@ -1,6 +1,6 @@
 {
   "name": "cc-continue",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Continue Claude Code sessions when you hit usage limits — generates a handoff prompt for Codex or other agents",
   "type": "module",
   "main": "./dist/index.mjs",

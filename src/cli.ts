@@ -258,15 +258,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     ui.success(`Wrote prompt to ${options.output}`);
   }
 
-  if (options.copy) {
-    const clipboard = copyToClipboard(finalPrompt);
-    if (clipboard.ok) {
-      ui.success(`Copied prompt to clipboard via ${clipboard.command}`);
-    } else {
-      ui.warn(`Clipboard copy failed: ${clipboard.error}`);
-    }
+  const clipboard = copyToClipboard(finalPrompt);
+  if (clipboard.ok) {
+    ui.success(`Copied to clipboard (${finalPrompt.length} chars)`);
+  } else {
+    ui.warn(`Clipboard copy failed: ${clipboard.error}`);
+    ui.success(`Prompt ready (${finalPrompt.length} chars)`);
   }
 
-  ui.success(`Prompt ready (${finalPrompt.length} chars)`);
   process.stdout.write(`${finalPrompt}\n`);
 }
