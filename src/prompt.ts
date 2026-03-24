@@ -247,12 +247,14 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
   }
   prompt += "\n";
 
-  prompt += "## Primary Goal\n\n";
-  prompt += `${userMessages[0] || "Continue the interrupted Claude Code session."}\n\n`;
-
-  if (userMessages.length > 1) {
-    prompt += "## Latest User Request\n\n";
-    prompt += `${userMessages[userMessages.length - 1]}\n\n`;
+  prompt += "## User Messages (chronological)\n\n";
+  if (userMessages.length === 0) {
+    prompt += "Continue the interrupted Claude Code session.\n\n";
+  } else {
+    for (const msg of userMessages) {
+      prompt += `- ${msg}\n`;
+    }
+    prompt += "\n";
   }
 
   if (errors.length > 0) {
@@ -339,11 +341,11 @@ export function buildRefinementDump(ctx: SessionContext, options: { target?: Tar
   sections.push(`Project cwd: ${ctx.sessionCwd}`);
   if (ctx.branch) sections.push(`Git branch: ${ctx.branch}`);
 
-  sections.push("\n=== USER GOALS ===");
+  sections.push("\n=== USER MESSAGES (chronological) ===");
   const userMessages = ctx.messages
     .filter((message) => message.role === "user" && message.content)
     .map((message) => `- ${compactText(message.content, 600)}`);
-  sections.push(userMessages.slice(0, 1).concat(userMessages.slice(-3)).join("\n") || "- No explicit user text found");
+  sections.push(userMessages.join("\n") || "- No explicit user text found");
 
   if (errors.length > 0) {
     sections.push("\n=== ERRORS & FAILURES ===");
