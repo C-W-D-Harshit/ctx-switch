@@ -1,5 +1,7 @@
 # ctx-switch
 
+[![ctx-switch](https://img.shields.io/npm/v/ctx-switch)](https://www.npmjs.com/package/ctx-switch) [![cc-continue](https://img.shields.io/npm/v/cc-continue?label=cc-continue)](https://www.npmjs.com/package/cc-continue)
+
 > Formerly `cc-continue` — existing installs still work, just use `ctx-switch` going forward.
 
 **Switch coding agents without losing context.**
@@ -153,24 +155,24 @@ export OPENROUTER_API_KEY=sk-or-v1-...
 
 ## Key Flags
 
-| Flag | Description |
-|------|-------------|
-| `--source <name>` | `claude`, `codex`, `opencode` |
-| `--target <name>` | `generic`, `codex`, `cursor`, `chatgpt` |
-| `--output <file>` | Save prompt |
-| `--session <id\|path>` | Use specific session |
-| `--refine` | Refine prompt via LLM |
-| `--provider` | Refinement provider (default: `openrouter`) |
-| `--model` | Override model |
-| `--api-key` | Override API key |
+| Flag                   | Description                                 |
+| ---------------------- | ------------------------------------------- |
+| `--source <name>`      | `claude`, `codex`, `opencode`               |
+| `--target <name>`      | `generic`, `codex`, `cursor`, `chatgpt`     |
+| `--output <file>`      | Save prompt                                 |
+| `--session <id\|path>` | Use specific session                        |
+| `--refine`             | Refine prompt via LLM                       |
+| `--provider`           | Refinement provider (default: `openrouter`) |
+| `--model`              | Override model                              |
+| `--api-key`            | Override API key                            |
 
 ## Session Storage
 
-| Source | Storage Path | Format |
-|--------|-------------|--------|
-| Claude Code | `~/.claude/projects/<encoded-cwd>/*.jsonl` | JSONL |
-| Codex | `~/.codex/sessions/<year>/<month>/<day>/*.jsonl` | JSONL |
-| OpenCode | `~/.local/share/opencode/opencode.db` | SQLite |
+| Source      | Storage Path                                     | Format |
+| ----------- | ------------------------------------------------ | ------ |
+| Claude Code | `~/.claude/projects/<encoded-cwd>/*.jsonl`       | JSONL  |
+| Codex       | `~/.codex/sessions/<year>/<month>/<day>/*.jsonl` | JSONL  |
+| OpenCode    | `~/.local/share/opencode/opencode.db`            | SQLite |
 
 ## Requirements
 
