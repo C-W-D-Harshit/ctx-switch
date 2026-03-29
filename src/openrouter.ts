@@ -59,7 +59,7 @@ export function classifyOpenRouterError({
       message: requestError,
       suggestions: [
         "Check your network connection and try again.",
-        "Run `cc-continue --raw` if you want to skip refinement.",
+        "Run `ctx-switch --raw` if you want to skip refinement.",
       ],
     };
   }
@@ -76,8 +76,8 @@ export function classifyOpenRouterError({
         "OpenRouter blocked this model because your privacy settings do not allow any available endpoint for it.",
       suggestions: [
         "Open https://openrouter.ai/settings/privacy and relax the privacy restriction for this model.",
-        "Retry with `cc-continue --raw` if you want to skip provider refinement.",
-        "Retry with `cc-continue --model <another-openrouter-model>` if you have another allowed model.",
+        "Retry with `ctx-switch --raw` if you want to skip provider refinement.",
+        "Retry with `ctx-switch --model <another-openrouter-model>` if you have another allowed model.",
       ],
       raw: providerMessage,
     };
@@ -89,7 +89,7 @@ export function classifyOpenRouterError({
       message: "OpenRouter rejected the request. Check that your API key is valid and allowed to use this model.",
       suggestions: [
         "Verify `OPENROUTER_API_KEY` or rerun interactively to save a fresh key.",
-        "Retry with `cc-continue --raw` if you want to skip refinement.",
+        "Retry with `ctx-switch --raw` if you want to skip refinement.",
       ],
       raw: providerMessage,
     };
@@ -100,8 +100,8 @@ export function classifyOpenRouterError({
       category: "not-found",
       message: "OpenRouter could not find a compatible endpoint for this request.",
       suggestions: [
-        "Retry with `cc-continue --model <another-openrouter-model>`.",
-        "Run `cc-continue --raw` if you want to skip provider refinement.",
+        "Retry with `ctx-switch --model <another-openrouter-model>`.",
+        "Run `ctx-switch --raw` if you want to skip provider refinement.",
       ],
       raw: providerMessage,
     };
@@ -113,7 +113,7 @@ export function classifyOpenRouterError({
       message: "OpenRouter rate limited this request.",
       suggestions: [
         "Wait a bit and retry.",
-        "Run `cc-continue --raw` if you want to skip refinement.",
+        "Run `ctx-switch --raw` if you want to skip refinement.",
       ],
       raw: providerMessage,
     };
@@ -122,7 +122,7 @@ export function classifyOpenRouterError({
   return {
     category: "provider",
     message: statusCode ? `OpenRouter error ${statusCode}: ${providerMessage}` : providerMessage,
-    suggestions: ["Retry with `cc-continue --raw` if you want to skip refinement."],
+    suggestions: ["Retry with `ctx-switch --raw` if you want to skip refinement."],
     raw: providerMessage,
   };
 }

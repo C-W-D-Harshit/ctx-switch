@@ -1,10 +1,12 @@
 export const SUPPORTED_COMMANDS = ["continue", "doctor", "sessions"] as const;
 export const SUPPORTED_PROVIDERS = ["openrouter"] as const;
 export const SUPPORTED_TARGETS = ["generic", "codex", "cursor", "chatgpt"] as const;
+export const SUPPORTED_SOURCES = ["claude", "codex", "opencode"] as const;
 
 export type Command = (typeof SUPPORTED_COMMANDS)[number];
 export type Provider = (typeof SUPPORTED_PROVIDERS)[number];
 export type Target = (typeof SUPPORTED_TARGETS)[number];
+export type Source = (typeof SUPPORTED_SOURCES)[number];
 
 export interface ParsedOptions {
   command: Command;
@@ -17,6 +19,7 @@ export interface ParsedOptions {
   output: string | null;
   apiKey: string | null;
   target: Target;
+  source: Source | null;
   limit: number;
 }
 

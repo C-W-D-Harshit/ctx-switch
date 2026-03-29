@@ -102,7 +102,7 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
   prompt += "# Task\n\n";
   prompt += `Project: \`${ctx.sessionCwd}\`\n`;
   if (ctx.branch) prompt += `Branch: \`${ctx.branch}\`\n`;
-  prompt += "\nThis is a continuation of an interrupted Claude Code session. ";
+  prompt += "\nThis is a continuation of an interrupted AI coding session. ";
   prompt += "The previous agent was working on the task below. Pick up where it left off.\n\n";
 
   prompt += "## What The User Asked (chronological)\n\n";
@@ -195,7 +195,7 @@ export function buildRefinementDump(ctx: SessionContext, options: { target?: Tar
 }
 
 export function buildRefinementSystemPrompt(target: Target): string {
-  return `You are an expert at creating continuation prompts for AI coding agents. You receive a structured dump of an interrupted Claude Code session and must produce a handoff prompt that lets the next agent pick up exactly where the previous one left off.
+  return `You are an expert at creating continuation prompts for AI coding agents. You receive a structured dump of an interrupted AI coding session and must produce a handoff prompt that lets the next agent pick up exactly where the previous one left off.
 
 Your output must be a single, actionable prompt with these sections:
 
@@ -230,7 +230,7 @@ Rules:
 }
 
 export function formatDoctorReport(report: DoctorReport): string {
-  const lines = ["cc-continue doctor", ""];
+  const lines = ["ctx-switch doctor", ""];
 
   for (const check of report.checks) {
     lines.push(`${check.status.padEnd(4)} ${check.label}: ${check.detail}`);

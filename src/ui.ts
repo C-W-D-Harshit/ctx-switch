@@ -1,4 +1,4 @@
-import type { DoctorReport, GitContext, ParsedOptions, SessionContext, SessionRecord } from "./types.js";
+import type { DoctorReport, GitContext, ParsedOptions, SessionContext, SessionRecord, Source } from "./types.js";
 
 function createColors(enabled: boolean) {
   const wrap = (code: string) => (text: string) => (enabled ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -101,7 +101,7 @@ export function formatRunSummary({
 }
 
 export function formatDoctorReport(report: DoctorReport): string {
-  const lines = ["cc-continue doctor", ""];
+  const lines = ["ctx-switch doctor", ""];
 
   for (const check of report.checks) {
     lines.push(`${pad(check.status, 4)} ${pad(check.label, 16)} ${check.detail}`);
@@ -130,19 +130,22 @@ export function formatSessionsReport({
   cwd,
   sessions,
   limit,
+  source,
 }: {
   cwd: string;
   sessions: SessionRecord[];
   limit: number;
+  source?: Source;
 }): string {
-  const lines = ["cc-continue sessions", "", `Project: ${cwd}`, ""];
+  const sourceLabel = source === "codex" ? "Codex" : source === "opencode" ? "OpenCode" : "Claude";
+  const lines = ["ctx-switch sessions", "", `Project: ${cwd}`, `Source: ${sourceLabel}`, ""];
 
   if (sessions.length === 0) {
-    lines.push("No Claude session files were found for this project.");
+    lines.push(`No ${sourceLabel} session files were found for this project.`);
     lines.push("");
     lines.push("Next Steps");
-    lines.push("- Run Claude Code in this project at least once.");
-    lines.push("- Run `cc-continue doctor` to verify the expected session directory.");
+    lines.push(`- Run ${sourceLabel} in this project at least once.`);
+    lines.push("- Run `ctx-switch doctor` to verify the expected session directory.");
     return lines.join("\n");
   }
 

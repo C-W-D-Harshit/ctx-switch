@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 import { getHelpText, parseArgs } from "./args.js";
 import { copyToClipboard } from "./clipboard.js";
 import {
@@ -16,10 +17,16 @@ import { buildRawPrompt, buildRefinementDump, buildRefinementSystemPrompt } from
 import { refineWithOpenRouter } from "./openrouter.js";
 import { buildSessionContext, listSessionsForProject, parseSession, resolveSessionPath } from "./session.js";
 import { createTheme, formatDoctorReport, formatRunSummary, formatSessionsReport } from "./ui.js";
-import type { AppError, PackageInfo } from "./types.js";
+import type { AppError, PackageInfo, Source } from "./types.js";
 
 declare const __PACKAGE_NAME__: string;
 declare const __PACKAGE_VERSION__: string;
+
+const SOURCE_LABELS: Record<Source, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+};
 
 function fail(message: string, { exitCode = 1, suggestions = [] as string[] } = {}): never {
   const error = new Error(message) as AppError;
@@ -93,6 +100,34 @@ function writeOutputFile(outputPath: string, text: string): void {
   fs.writeFileSync(outputPath, `${text}\n`);
 }
 
+async function promptForSource(): Promise<Source> {
+  const sources: Source[] = ["claude", "codex", "opencode"];
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+
+  process.stderr.write("\nSelect the AI agent to extract context from:\n\n");
+  for (let i = 0; i < sources.length; i++) {
+    process.stderr.write(`  ${i + 1}) ${SOURCE_LABELS[sources[i]]}\n`);
+  }
+  process.stderr.write("\n");
+
+  return new Promise<Source>((resolve) => {
+    rl.question("Enter choice (1-3): ", (answer) => {
+      rl.close();
+      const idx = Number.parseInt(answer.trim(), 10) - 1;
+      if (idx >= 0 && idx < sources.length) {
+        resolve(sources[idx]);
+      } else {
+        // Default to claude if invalid input
+        process.stderr.write("Invalid choice, defaulting to Claude Code.\n");
+        resolve("claude");
+      }
+    });
+  });
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(argv);
   const pkgInfo: PackageInfo = { name: __PACKAGE_NAME__, version: __PACKAGE_VERSION__ };
@@ -111,9 +146,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   const cwd = process.cwd();
   const config = loadConfig();
 
+  // Resolve source: use --source flag or prompt interactively
+  let source: Source;
+  if (options.source) {
+    source = options.source;
+  } else if (process.stdin.isTTY) {
+    source = await promptForSource();
+  } else {
+    // Non-interactive, default to claude
+    source = "claude";
+  }
+
+  const sourceLabel = SOURCE_LABELS[source];
+
   if (options.command === "doctor") {
     const report = runDoctor({
       cwd,
+      source,
       provider: options.provider,
       cliApiKey: options.apiKey,
       env: process.env,
@@ -124,31 +173,32 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   }
 
   if (options.command === "sessions") {
-    const sessions = listSessionsForProject(cwd);
-    process.stdout.write(`${formatSessionsReport({ cwd, sessions, limit: options.limit })}\n`);
+    const sessions = listSessionsForProject(cwd, source);
+    process.stdout.write(`${formatSessionsReport({ cwd, sessions, limit: options.limit, source })}\n`);
     return;
   }
 
-  ui.step("Finding Claude session");
-  const sessionPath = resolveSessionPath(options.session, cwd);
+  ui.step(`Finding ${sourceLabel} session`);
+  const sessionPath = resolveSessionPath(options.session, cwd, source);
   if (!sessionPath) {
     fail(
       options.session
-        ? `Unable to find session "${options.session}" for ${cwd}`
-        : `No Claude session files found for ${cwd}.`,
+        ? `Unable to find session "${options.session}" for ${cwd} (source: ${sourceLabel})`
+        : `No ${sourceLabel} session files found for ${cwd}.`,
       {
         suggestions: [
-          "Run `cc-continue sessions` to inspect project sessions.",
-          "Run `cc-continue doctor` for diagnostics.",
-          "Run Claude Code in this project at least once if no sessions exist yet.",
+          `Run \`ctx-switch sessions --source ${source}\` to inspect project sessions.`,
+          "Run `ctx-switch doctor` for diagnostics.",
+          `Run ${sourceLabel} in this project at least once if no sessions exist yet.`,
         ],
       }
     );
   }
-  ui.success(`Using session ${path.basename(sessionPath)}`);
+  const sessionDisplay = source === "opencode" ? sessionPath : path.basename(sessionPath);
+  ui.success(`Using session ${sessionDisplay}`);
 
   ui.step("Parsing session");
-  const { messages, meta } = parseSession(sessionPath);
+  const { messages, meta } = parseSession(sessionPath, source);
   if (messages.length === 0) {
     fail(`Parsed zero usable messages from ${sessionPath}`);
   }

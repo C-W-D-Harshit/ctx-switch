@@ -1,149 +1,192 @@
-# cc-continue
+# ctx-switch
 
-Hit the Claude Code usage limit mid-task? `cc-continue` turns the latest Claude session in your current project into a continuation prompt you can paste into **Codex**, **Cursor**, **ChatGPT**, or any other AI agent to keep going.
+> Formerly `cc-continue` — existing installs still work, just use `ctx-switch` going forward.
 
-## The Problem
+**Switch coding agents without losing context.**
+Agent handoff for Claude Code, Codex, and OpenCode.
 
-You're deep in a Claude Code session — it's editing files, running commands, making progress — and then:
+## Why this exists
 
-> **Usage limit reached. Please wait before sending more messages.**
+You're in the middle of a coding session. Things are working. Progress is being made.
 
-Your work is half-done. You can't continue. You switch to another AI agent but now you have to explain everything from scratch.
+And then you need to switch.
 
-## The Solution
+- Maybe the session can't continue
+- Maybe something isn't working as expected
+- Maybe you just want to move to another agent
+
+Now you're stuck.
+
+You switch to another agent — but:
+
+- it has no context
+- you have to explain everything again
+- you lose momentum
+
+**Your work shouldn't reset just because you switched tools.**
+
+## What ctx-switch does
 
 ```bash
-npx cc-continue
+npx ctx-switch
 ```
 
-That's it. It reads your Claude Code session, captures the current git state, and produces a structured continuation prompt that another agent can pick up immediately.
+It captures your current session — code, context, decisions, errors — and generates a clean, structured handoff prompt so another agent can continue immediately.
+
+No re-explaining.
+No rebuilding context.
+No wasted time.
+
+**Just continue where you left off.**
+
+### Core idea
+
+> Switch agents. Don't restart.
 
 ## Features
 
-- Finds the latest Claude session for the current project, or pick one with `--session`
-- Filters noise from user messages (confirmations, short replies, interruptions)
-- Tracks only **unresolved** errors — skips errors that were later fixed
-- Captures recent commits, committed diffs, staged/unstaged changes, and untracked files
-- Extracts key decisions and pivots from the previous agent
-- Produces a priority-ordered prompt: Task → Errors → Decisions → Completed Work → Current State → Instructions
-- Supports target-specific prompts with `--target codex|cursor|chatgpt|generic`
-- Auto-copies to clipboard on macOS, Linux, and Windows
-- Optional LLM refinement via `--refine` (uses OpenRouter)
-- Lists recent project sessions with `cc-continue sessions`
+- **Multi-agent support**: Claude Code, Codex, OpenCode
+- **Smart session detection**: Finds the latest session for your current project
+- **Context extraction**:
+  - Filters noise (confirmations, filler)
+  - Keeps only relevant context
+- **Error awareness**:
+  - Includes unresolved errors
+  - Skips already-fixed issues
+- **Codebase state capture**:
+  - Recent commits
+  - Diffs (staged & unstaged)
+  - Untracked files
+- **Decision tracking**:
+  - Extracts key decisions and pivots
+- **Structured output**:
+  - Task → Errors → Decisions → Completed Work → Current State → Instructions
+- **Target-aware prompts**:
+  - `codex`, `cursor`, `chatgpt`, or `generic`
+- **Clipboard ready**: Auto-copy across macOS, Linux, Windows
+- **Optional LLM refinement** (`--refine`)
+- `sessions` command to browse recent sessions
 - `doctor` command for diagnostics
 
-## How It Works
+## How it works
 
-1. Maps your current directory to Claude Code's session storage (`~/.claude/projects/`)
-2. Finds the most recent session `.jsonl` file
-3. Parses the conversation — user messages, tool calls, errors, and results
-4. Captures the current git state: branch, commits, diffs, untracked files
-5. Builds a structured prompt optimized for agent handoff
-6. Copies to clipboard and prints to stdout
+1. Select your source agent (Claude / Codex / OpenCode)
+2. `ctx-switch` finds the latest session for your project
+3. Parses:
+   - conversation
+   - tool calls
+   - errors
+4. Captures git state:
+   - branch
+   - commits
+   - diffs
+5. Builds a structured handoff prompt
+6. Copies it to clipboard and prints it
 
 ## Install
 
 ```bash
-# Run directly (no install needed)
-npx cc-continue
+# Run instantly
+npx ctx-switch
 
 # Or install globally
-npm i -g cc-continue
+npm i -g ctx-switch
 ```
 
 ## Usage
 
 ```bash
-# cd into the project where Claude Code was running
 cd my-project
 
-# Generate a continuation prompt (auto-copies to clipboard)
-cc-continue
+# Interactive mode
+ctx-switch
 
-# Target Codex specifically
-cc-continue --target codex
+# Specify source
+ctx-switch --source claude
+ctx-switch --source codex
+ctx-switch --source opencode
 
-# Pick a specific session
-cc-continue --session 4474da94-50a9-40de-9afe-c6c73acf2401
+# Target a specific agent
+ctx-switch --source claude --target codex
 
-# Refine via OpenRouter LLM (optional)
-cc-continue --refine
+# Use a specific session
+ctx-switch --source claude --session <id>
 
-# List recent sessions for this project
-cc-continue sessions --limit 5
+# Refine output with LLM
+ctx-switch --refine
 
-# Write to a file
-cc-continue --output ./handoff.md
+# List sessions
+ctx-switch sessions --source claude --limit 5
+
+# Save to a file
+ctx-switch --output ./handoff.md
 
 # Run diagnostics
-cc-continue doctor
+ctx-switch doctor --source codex
 ```
 
-### LLM Refinement (Optional)
+## Example use cases
 
-If you want the prompt refined by an LLM, use `--refine`. On first use, it'll ask for your OpenRouter API key:
+- Continue work in another agent when switching is needed
+- Move a session across tools without re-explaining everything
+- Resume work seamlessly in a different environment
+- Preserve context when changing workflows
+
+## LLM Refinement (Optional)
+
+Use `--refine` to improve the generated prompt via an LLM.
+
+On first use:
 
 ```
 Enter your OpenRouter API key: sk-or-v1-...
-Saved to ~/.cc-continue.json
+Saved to ~/.ctx-switch.json
 ```
 
-Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys). You can also set it via environment variable:
+Get a key: [openrouter.ai/keys](https://openrouter.ai/keys)
+
+Or set manually:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-## Commands
+## Key Flags
 
-```bash
-cc-continue [options]
-cc-continue doctor
-cc-continue sessions
-```
+| Flag | Description |
+|------|-------------|
+| `--source <name>` | `claude`, `codex`, `opencode` |
+| `--target <name>` | `generic`, `codex`, `cursor`, `chatgpt` |
+| `--output <file>` | Save prompt |
+| `--session <id\|path>` | Use specific session |
+| `--refine` | Refine prompt via LLM |
+| `--provider` | Refinement provider (default: `openrouter`) |
+| `--model` | Override model |
+| `--api-key` | Override API key |
 
-### Key Flags
+## Session Storage
 
-- `--target <name>` Tailor the prompt for `generic`, `codex`, `cursor`, or `chatgpt`
-- `--output <file>` Write the prompt to a file
-- `--session <id|path>` Use a specific Claude session
-- `--limit <count>` Limit rows for `cc-continue sessions`
-- `--refine` Refine the prompt via an LLM provider (default: raw mode)
-- `--provider <name>` Refinement provider (default: `openrouter`)
-- `--model <name>` Override the provider model (default: `openrouter/free`)
-- `--api-key <key>` Override the API key for a single run
-
-## Sessions
-
-```bash
-cc-continue sessions
-```
-
-Use this before `--session` when you want to verify which Claude run you are continuing.
-
-## How It Finds Your Session
-
-Claude Code stores sessions at:
-
-```
-~/.claude/projects/<project-path>/<session-id>.jsonl
-```
-
-Where `<project-path>` is your working directory with path separators replaced by `-`. `cc-continue` finds the most recently modified top-level `.jsonl` file for your current directory.
+| Source | Storage Path | Format |
+|--------|-------------|--------|
+| Claude Code | `~/.claude/projects/<encoded-cwd>/*.jsonl` | JSONL |
+| Codex | `~/.codex/sessions/<year>/<month>/<day>/*.jsonl` | JSONL |
+| OpenCode | `~/.local/share/opencode/opencode.db` | SQLite |
 
 ## Requirements
 
 - **Node.js** >= 18
-- **Claude Code** (must have been used in the current directory at least once)
-- **OpenRouter API key** (only needed with `--refine`)
+- **Claude Code, Codex, or OpenCode** (used in current directory)
+- **sqlite3** (only for OpenCode sessions)
+- **OpenRouter API key** (only if using `--refine`)
 
-## Doctor
+## Migrating from cc-continue
+
+`cc-continue` still works — it's now an alias for `ctx-switch`.
 
 ```bash
-cc-continue doctor
+npm uninstall -g cc-continue
+npm i -g ctx-switch
 ```
-
-Checks session storage, project sessions, git repo, API key availability, and clipboard support.
 
 ## License
 

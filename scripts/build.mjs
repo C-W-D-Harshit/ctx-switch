@@ -29,7 +29,7 @@ await build({
     js: "#!/usr/bin/env node",
   },
   define: {
-    __PACKAGE_NAME__: JSON.stringify(packageJson.name),
+    __PACKAGE_NAME__: JSON.stringify("ctx-switch"),
     __PACKAGE_VERSION__: JSON.stringify(packageJson.version),
   },
 });

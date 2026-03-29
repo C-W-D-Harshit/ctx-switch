@@ -1,11 +1,12 @@
 {
-  "name": "cc-continue",
-  "version": "1.3.0",
-  "description": "Continue Claude Code sessions when you hit usage limits — generates a handoff prompt for Codex or other agents",
+  "name": "ctx-switch",
+  "version": "2.0.0",
+  "description": "Switch context between AI coding agents — extract sessions from Claude Code, Codex, or OpenCode and generate handoff prompts",
   "type": "module",
   "main": "./dist/index.mjs",
   "exports": "./dist/index.mjs",
   "bin": {
+    "ctx-switch": "./dist/index.mjs",
     "cc-continue": "./dist/index.mjs"
   },
   "files": [
@@ -23,13 +24,16 @@
     "prepack": "npm run build"
   },
   "keywords": [
+    "ctx-switch",
     "claude-code",
     "claude",
     "codex",
+    "opencode",
     "ai",
     "cli",
     "continuation",
     "handoff",
+    "context-switch",
     "openrouter",
     "agent"
   ],

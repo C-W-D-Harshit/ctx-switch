@@ -5,7 +5,7 @@ import { buildSessionContext, parseSession } from "../src/session.js";
 
 test("parseSession extracts nested progress tool calls and ignores tool-only user results", () => {
   const fixture = path.join(import.meta.dirname, "fixtures", "sample-session.jsonl");
-  const { messages, meta } = parseSession(fixture);
+  const { messages, meta } = parseSession(fixture, "claude");
 
   assert.equal(meta.sessionId, "demo-session");
   assert.equal(meta.gitBranch, "feature/demo");

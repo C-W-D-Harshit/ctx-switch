@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   SUPPORTED_COMMANDS,
   SUPPORTED_PROVIDERS,
+  SUPPORTED_SOURCES,
   SUPPORTED_TARGETS,
   type PackageInfo,
   type ParsedOptions,
@@ -28,6 +29,7 @@ export function parseArgs(argv: string[]): ParsedOptions {
     output: null,
     apiKey: null,
     target: "generic",
+    source: null,
     limit: 10,
   };
 
@@ -70,6 +72,9 @@ export function parseArgs(argv: string[]): ParsedOptions {
       case "--target":
         options.target = requireValue(arg, args) as ParsedOptions["target"];
         break;
+      case "--source":
+        options.source = requireValue(arg, args) as ParsedOptions["source"];
+        break;
       case "--limit":
       case "-n":
         options.limit = Number(requireValue(arg, args));
@@ -101,6 +106,12 @@ export function parseArgs(argv: string[]): ParsedOptions {
     );
   }
 
+  if (options.source && !SUPPORTED_SOURCES.includes(options.source)) {
+    throw new Error(
+      `Unsupported source "${options.source}". Supported sources: ${SUPPORTED_SOURCES.join(", ")}`
+    );
+  }
+
   if (!SUPPORTED_COMMANDS.includes(options.command)) {
     throw new Error(
       `Unsupported command "${options.command}". Supported commands: ${SUPPORTED_COMMANDS.join(", ")}`
@@ -118,7 +129,8 @@ export function getHelpText({ name, version }: PackageInfo): string {
   return [
     `${name} ${version}`,
     "",
-    "Turn Claude Code sessions into high-quality continuation prompts for Codex, Cursor, ChatGPT, or any other agent.",
+    "Turn AI coding agent sessions into high-quality continuation prompts for Codex, Cursor, ChatGPT, or any other agent.",
+    "Supports Claude Code, Codex, and OpenCode as session sources.",
     "",
     "Usage",
     `  ${name} [options]`,
@@ -129,6 +141,7 @@ export function getHelpText({ name, version }: PackageInfo): string {
     "  -h, --help              Show help",
     "  -v, --version           Show version",
     "  -o, --output <file>     Write the final prompt to a file",
+    "      --source <name>     Session source: claude, codex, opencode (interactive if omitted)",
     "      --session <id|path> Use a specific session file or session id",
     "      --target <name>     Prompt target: generic, codex, cursor, chatgpt",
     "  -n, --limit <count>     Limit rows for the sessions command (default: 10)",
@@ -140,17 +153,19 @@ export function getHelpText({ name, version }: PackageInfo): string {
     "      --api-key <key>     Provider API key override",
     "",
     "Doctor",
-    "  Verifies Claude session discovery, git context, clipboard support, and API key availability.",
+    "  Verifies session discovery, git context, clipboard support, and API key availability.",
     "",
     "Sessions",
-    "  Lists recent Claude session files for the current project.",
+    "  Lists recent session files for the current project from the selected source.",
     "",
     "Examples",
-    `  ${name}`,
-    `  ${name} --target codex`,
+    `  ${name}                              # interactive source picker`,
+    `  ${name} --source claude               # use Claude Code sessions`,
+    `  ${name} --source codex --target codex`,
+    `  ${name} --source opencode`,
     `  ${name} --refine --model openrouter/free`,
     `  ${name} --output ./handoff.md`,
     `  ${name} doctor`,
-    `  ${name} sessions --limit 5`,
+    `  ${name} sessions --source claude --limit 5`,
   ].join("\n");
 }

@@ -3,14 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import type { AppConfig, Provider } from "./types.js";
 
-export const CONFIG_PATH = path.join(os.homedir(), ".cc-continue.json");
+export const CONFIG_PATH = path.join(os.homedir(), ".ctx-switch.json");
+const LEGACY_CONFIG_PATH = path.join(os.homedir(), ".cc-continue.json");
 
 export function loadConfig(configPath: string = CONFIG_PATH): AppConfig {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, "utf8")) as AppConfig;
-  } catch {
-    return {};
+  // Try new config first, fall back to legacy
+  for (const candidate of [configPath, LEGACY_CONFIG_PATH]) {
+    try {
+      return JSON.parse(fs.readFileSync(candidate, "utf8")) as AppConfig;
+    } catch {
+      // try next
+    }
   }
+  return {};
 }
 
 export function saveConfig(config: AppConfig, configPath: string = CONFIG_PATH): void {
