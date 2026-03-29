@@ -1,6 +1,6 @@
 {
   "name": "ctx-switch",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Switch coding agents without losing context. Generate handoff prompts across Claude Code, Codex, and OpenCode.",
   "type": "module",
   "main": "./dist/index.mjs",
