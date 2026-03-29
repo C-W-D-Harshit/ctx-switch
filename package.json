@@ -1,6 +1,6 @@
 {
   "name": "ctx-switch",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Switch context between AI coding agents — extract sessions from Claude Code, Codex, or OpenCode and generate handoff prompts",
   "type": "module",
   "main": "./dist/index.mjs",
@@ -43,12 +43,12 @@
     "node": ">=18"
   },
   "bugs": {
-    "url": "https://github.com/C-W-D-Harshit/cc-continue/issues"
+    "url": "https://github.com/C-W-D-Harshit/ctx-switch/issues"
   },
-  "homepage": "https://github.com/C-W-D-Harshit/cc-continue#readme",
+  "homepage": "https://github.com/C-W-D-Harshit/ctx-switch#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/C-W-D-Harshit/cc-continue"
+    "url": "https://github.com/C-W-D-Harshit/ctx-switch"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",
