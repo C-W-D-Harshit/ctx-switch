@@ -25,6 +25,12 @@ test("parseArgs handles product flags", () => {
   assert.match(parsed.output || "", /handoff\.md$/);
 });
 
+test("parseArgs supports claude target", () => {
+  const parsed = parseArgs(["--source", "codex", "--target", "claude"]);
+  assert.equal(parsed.source, "codex");
+  assert.equal(parsed.target, "claude");
+});
+
 test("parseArgs supports doctor command", () => {
   const parsed = parseArgs(["doctor", "--provider", "openrouter"]);
   assert.equal(parsed.command, "doctor");

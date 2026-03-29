@@ -1,6 +1,6 @@
 export const SUPPORTED_COMMANDS = ["continue", "doctor", "sessions"] as const;
 export const SUPPORTED_PROVIDERS = ["openrouter"] as const;
-export const SUPPORTED_TARGETS = ["generic", "codex", "cursor", "chatgpt"] as const;
+export const SUPPORTED_TARGETS = ["generic", "claude", "codex", "cursor", "chatgpt"] as const;
 export const SUPPORTED_SOURCES = ["claude", "codex", "opencode"] as const;
 
 export type Command = (typeof SUPPORTED_COMMANDS)[number];

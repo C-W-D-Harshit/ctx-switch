@@ -64,6 +64,24 @@ function extractCommand(input: Record<string, unknown>): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function resolveSessionFilePath(filePath: string, cwd: string): string {
+  return path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath);
+}
+
+function extractPatchFilePaths(input: Record<string, unknown>, cwd: string): string[] {
+  const patch = input.patch;
+  if (typeof patch !== "string") return [];
+
+  const matches = [...patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)];
+  return matches.map((match) => resolveSessionFilePath(match[1].trim(), cwd));
+}
+
+function extractParsedCommands(input: Record<string, unknown>): Array<Record<string, unknown>> {
+  const parsed = input.parsed_cmd;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object");
+}
+
 export function buildSessionContext({
   messages,
   meta,
@@ -88,11 +106,22 @@ export function buildSessionContext({
         const toolName = String(toolCall.tool || "").toLowerCase();
         const filePath = extractFilePath(toolCall.input);
         const command = extractCommand(toolCall.input);
+        const patchPaths = extractPatchFilePaths(toolCall.input, cwd);
+        const parsedCommands = extractParsedCommands(toolCall.input);
 
         if (filePath && /(edit|write|create|multi_edit)/.test(toolName)) {
-          filesModified.add(filePath);
+          filesModified.add(resolveSessionFilePath(filePath, cwd));
         } else if (filePath && /(read|grep|glob|search)/.test(toolName)) {
-          filesRead.add(filePath);
+          filesRead.add(resolveSessionFilePath(filePath, cwd));
+        }
+
+        for (const patchPath of patchPaths) {
+          filesModified.add(patchPath);
+        }
+
+        for (const parsedCommand of parsedCommands) {
+          if (parsedCommand.type !== "read" || typeof parsedCommand.path !== "string") continue;
+          filesRead.add(resolveSessionFilePath(parsedCommand.path, cwd));
         }
 
         if (command && /(bash|command|run|exec_command)/.test(toolName)) {
@@ -110,8 +139,10 @@ export function buildSessionContext({
         .map((toolCall) => {
           const filePath = extractFilePath(toolCall.input);
           const command = extractCommand(toolCall.input);
+          const patchPaths = extractPatchFilePaths(toolCall.input, cwd);
           let summary = "";
-          if (filePath) summary = `${toolCall.tool} ${filePath}`;
+          if (filePath) summary = `${toolCall.tool} ${resolveSessionFilePath(filePath, cwd)}`;
+          else if (patchPaths.length > 0) summary = `${toolCall.tool} ${patchPaths.join(", ")}`;
           else if (command) summary = `${toolCall.tool}: ${command}`;
           else summary = toolCall.tool;
 

@@ -22,9 +22,81 @@ interface CodexResponseItem {
     role?: string;
     name?: string;
     arguments?: string;
+    input?: string | Record<string, unknown>;
     call_id?: string;
     output?: string;
+    parsed_cmd?: Array<Record<string, unknown>>;
+    aggregated_output?: string;
+    exit_code?: number;
     content?: Array<{ type?: string; text?: string }>;
+  };
+}
+
+function parseJsonRecord(line: string): CodexResponseItem | null {
+  try {
+    return JSON.parse(line) as CodexResponseItem;
+  } catch {
+    return null;
+  }
+}
+
+function parseFunctionArguments(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseCustomToolInput(toolName: string | undefined, raw: string | Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw !== "string") return raw;
+
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Keep the raw string below.
+    }
+  }
+
+  if (toolName === "apply_patch") {
+    return { patch: raw };
+  }
+
+  return { input: raw };
+}
+
+function parseToolOutput(raw: string | undefined): { text: string; isError?: boolean } {
+  if (!raw) return { text: "" };
+
+  let text = raw;
+  let exitCode: number | undefined;
+
+  try {
+    const parsed = JSON.parse(raw) as { output?: unknown; metadata?: { exit_code?: unknown } };
+    if (typeof parsed.output === "string") {
+      text = parsed.output;
+    }
+    if (typeof parsed.metadata?.exit_code === "number") {
+      exitCode = parsed.metadata.exit_code;
+    }
+  } catch {
+    // Keep raw text.
+  }
+
+  const isError =
+    exitCode !== undefined ? exitCode !== 0 : /Process exited with code [^0]/.test(text) || /error|Error|ERROR/.test(text.slice(0, 200));
+
+  return {
+    text: text.slice(0, 1500),
+    isError: isError || undefined,
   };
 }
 
@@ -129,12 +201,8 @@ export function parseSession(sessionPath: string): { messages: SessionMessage[];
   }
 
   for (const line of lines) {
-    let record: CodexResponseItem;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      continue;
-    }
+    const record = parseJsonRecord(line);
+    if (!record) continue;
 
     // Extract session metadata
     if (record.type === "session_meta") {
@@ -142,6 +210,22 @@ export function parseSession(sessionPath: string): { messages: SessionMessage[];
       if (payload.cwd) meta.cwd = payload.cwd;
       if (payload.git?.branch) meta.gitBranch = payload.git.branch;
       if (payload.id) meta.sessionId = payload.id;
+      continue;
+    }
+
+    if (record.type === "event_msg" && record.payload.type === "exec_command_end" && record.payload.call_id) {
+      const tc = pendingCalls.get(record.payload.call_id);
+      if (tc) {
+        if (Array.isArray(record.payload.parsed_cmd)) {
+          tc.input.parsed_cmd = record.payload.parsed_cmd;
+        }
+        if (typeof record.payload.aggregated_output === "string" && !tc.result) {
+          tc.result = record.payload.aggregated_output.slice(0, 1500);
+        }
+        if (typeof record.payload.exit_code === "number") {
+          tc.isError = record.payload.exit_code !== 0;
+        }
+      }
       continue;
     }
 
@@ -186,12 +270,7 @@ export function parseSession(sessionPath: string): { messages: SessionMessage[];
 
     // Function call (tool use)
     if (payloadType === "function_call" && payload.name) {
-      let input: Record<string, unknown> = {};
-      try {
-        input = JSON.parse(payload.arguments || "{}");
-      } catch {
-        // keep empty
-      }
+      const input = parseFunctionArguments(payload.arguments);
 
       const tc: ToolCall = {
         id: payload.call_id || null,
@@ -205,15 +284,28 @@ export function parseSession(sessionPath: string): { messages: SessionMessage[];
       continue;
     }
 
+    if (payloadType === "custom_tool_call" && payload.name) {
+      const tc: ToolCall = {
+        id: payload.call_id || null,
+        tool: payload.name,
+        input: parseCustomToolInput(payload.name, payload.input),
+      };
+      currentToolCalls.push(tc);
+      if (payload.call_id) {
+        pendingCalls.set(payload.call_id, tc);
+      }
+      continue;
+    }
+
     // Function call output (tool result)
-    if (payloadType === "function_call_output" && payload.call_id) {
+    if ((payloadType === "function_call_output" || payloadType === "custom_tool_call_output") && payload.call_id) {
       const tc = pendingCalls.get(payload.call_id);
       if (tc) {
-        const output = payload.output || "";
-        tc.result = output.slice(0, 1500);
-        // Check for error indicators in exec_command output
-        tc.isError = /Process exited with code [^0]/.test(output) ||
-                     /error|Error|ERROR/.test(output.slice(0, 200));
+        const parsed = parseToolOutput(payload.output);
+        tc.result = parsed.text;
+        if (parsed.isError !== undefined) {
+          tc.isError = parsed.isError;
+        }
       }
       continue;
     }
