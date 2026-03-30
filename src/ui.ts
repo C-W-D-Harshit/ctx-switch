@@ -95,6 +95,9 @@ export function formatRunSummary({
   lines.push(`  Messages: ${ctx.messages.length}`);
   lines.push(`  Files: ${ctx.filesModified.length} modified, ${ctx.filesRead.length} read`);
   lines.push(`  Git: ${summarizeGitContext(ctx.gitContext)}`);
+  if (options.fromUser) {
+    lines.push(`  Focus: user prompt #${options.fromUser}`);
+  }
   lines.push(`  Target: ${options.target}`);
   lines.push(`  Mode: ${mode === "raw" ? "raw" : `refined via ${options.provider}${model ? ` (${model})` : ""}`}`);
   return lines.join("\n");

@@ -42,3 +42,9 @@ test("parseArgs supports sessions command and limit", () => {
   assert.equal(parsed.command, "sessions");
   assert.equal(parsed.limit, 5);
 });
+
+test("parseArgs supports manual user focus flags", () => {
+  const parsed = parseArgs(["--pick-user", "--from-user", "2"]);
+  assert.equal(parsed.pickUser, true);
+  assert.equal(parsed.fromUser, 2);
+});

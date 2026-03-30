@@ -13,6 +13,8 @@ export interface ParsedOptions {
   refine: boolean;
   help: boolean;
   version: boolean;
+  pickUser: boolean;
+  fromUser: number | null;
   session: string | null;
   model: string | null;
   provider: Provider;

@@ -13,11 +13,11 @@ import {
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
 import { getGitContext } from "./git.js";
-import { buildRawPrompt, buildRefinementDump, buildRefinementSystemPrompt } from "./prompt.js";
+import { buildRawPrompt, buildRefinementDump, buildRefinementSystemPrompt, listSubstantiveUserMessages } from "./prompt.js";
 import { refineWithOpenRouter } from "./openrouter.js";
 import { buildSessionContext, listSessionsForProject, parseSession, resolveSessionPath } from "./session.js";
 import { createTheme, formatDoctorReport, formatRunSummary, formatSessionsReport } from "./ui.js";
-import type { AppError, PackageInfo, Source } from "./types.js";
+import type { AppError, PackageInfo, SessionContext, Source } from "./types.js";
 
 declare const __PACKAGE_NAME__: string;
 declare const __PACKAGE_VERSION__: string;
@@ -128,6 +128,51 @@ async function promptForSource(): Promise<Source> {
   });
 }
 
+function summarizePromptChoice(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
+async function promptForUserStart(messages: SessionContext["messages"]): Promise<number | null> {
+  const userPrompts = listSubstantiveUserMessages(messages);
+  if (userPrompts.length === 0) {
+    return null;
+  }
+  if (userPrompts.length === 1) {
+    process.stderr.write("\nOnly one substantive user prompt was found. Using it automatically.\n");
+    return 1;
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+
+  process.stderr.write("\nSelect the user prompt to preserve context from:\n\n");
+  for (const prompt of userPrompts) {
+    process.stderr.write(`  ${prompt.index}) ${summarizePromptChoice(prompt.text)}\n`);
+  }
+  process.stderr.write("\n");
+
+  return new Promise<number | null>((resolve) => {
+    rl.question(`Enter choice (1-${userPrompts.length}): `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim();
+      if (!trimmed) {
+        process.stderr.write("Invalid choice, using automatic focus.\n");
+        resolve(null);
+        return;
+      }
+      const idx = Number.parseInt(trimmed, 10);
+      if (idx >= 1 && idx <= userPrompts.length) {
+        resolve(idx);
+      } else {
+        process.stderr.write("Invalid choice, using automatic focus.\n");
+        resolve(null);
+      }
+    });
+  });
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(argv);
   const pkgInfo: PackageInfo = { name: __PACKAGE_NAME__, version: __PACKAGE_VERSION__ };
@@ -203,6 +248,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     fail(`Parsed zero usable messages from ${sessionPath}`);
   }
 
+  let fromUserMessage = options.fromUser;
+  const userPrompts = listSubstantiveUserMessages(messages);
+  if (fromUserMessage !== null && fromUserMessage > userPrompts.length) {
+    fail(
+      `Requested --from-user ${fromUserMessage}, but only ${userPrompts.length} substantive user prompt(s) were found.`,
+      {
+        suggestions: ["Run `ctx-switch --pick-user` to choose interactively.", "Omit `--from-user` to use automatic focus."],
+      }
+    );
+  }
+  if (options.pickUser && process.stdin.isTTY) {
+    ui.step("Choosing preserved context start");
+    fromUserMessage = await promptForUserStart(messages);
+  }
+
   ui.step("Capturing git context");
   const gitContext = getGitContext(cwd);
   const ctx = buildSessionContext({
@@ -219,7 +279,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
   if (!options.refine) {
     ui.step("Building continuation prompt");
-    finalPrompt = buildRawPrompt(ctx, { target: options.target });
+    finalPrompt = buildRawPrompt(ctx, { target: options.target, fromUserMessage });
   } else {
     const provider = options.provider;
     let apiKey = getApiKey({
@@ -259,7 +319,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         apiKey,
         model,
         systemPrompt: buildRefinementSystemPrompt(options.target),
-        userPrompt: buildRefinementDump(ctx, { target: options.target }),
+        userPrompt: buildRefinementDump(ctx, { target: options.target, fromUserMessage }),
         timeoutMs: 0,
         onStatus: (status) => {
           if (!streamStarted) reporter.update(status);
@@ -293,7 +353,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ui.note(`Provider detail: ${refined.rawError}`);
         }
         ui.note("Falling back to the raw structured prompt.");
-        finalPrompt = buildRawPrompt(ctx, { target: options.target });
+        finalPrompt = buildRawPrompt(ctx, { target: options.target, fromUserMessage });
       }
     }
   }

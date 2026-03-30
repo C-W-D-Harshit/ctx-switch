@@ -13,6 +13,17 @@ function unique<T>(list: T[]): T[] {
   return [...new Set(list.filter(Boolean))];
 }
 
+function isLocalCommandMarkup(text: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  return (
+    trimmed.includes("<local-command-caveat>") ||
+    trimmed.includes("<command-name>") ||
+    trimmed.includes("<command-message>") ||
+    trimmed.includes("<command-args>") ||
+    trimmed.includes("<local-command-stdout>")
+  );
+}
+
 function extractFilePath(input: Record<string, unknown>): string | null {
   const value = input.file_path || input.path || input.target_file || input.filePath;
   return typeof value === "string" ? value : null;
@@ -21,6 +32,13 @@ function extractFilePath(input: Record<string, unknown>): string | null {
 function extractCommand(input: Record<string, unknown>): string | null {
   const value = input.command || input.cmd;
   return typeof value === "string" ? value : null;
+}
+
+function getSubstantiveUserIndexes(messages: SessionContext["messages"]): number[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => message.role === "user" && message.content && !isNoiseMessage(message.content))
+    .map(({ index }) => index);
 }
 
 function buildTargetGuidance(target: Target | undefined): string {
@@ -40,6 +58,7 @@ function buildTargetGuidance(target: Target | undefined): string {
 
 function isNoiseMessage(text: string): boolean {
   const trimmed = text.trim().toLowerCase();
+  if (isLocalCommandMarkup(trimmed)) return true;
   const normalized = trimmed.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
   // Very short messages are almost always noise
   if (trimmed.length < 5) return true;
@@ -53,6 +72,18 @@ function isNoiseMessage(text: string): boolean {
   // "[Request interrupted by user...]" system messages
   if (trimmed.startsWith("[request interrupted")) return true;
   return false;
+}
+
+function isAssistantNoiseMessage(text: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed) return true;
+  if (isLocalCommandMarkup(trimmed)) return true;
+  return (
+    trimmed.includes("you're out of extra usage") ||
+    trimmed.includes("resets 3:30pm") ||
+    trimmed.includes("rate limit") ||
+    trimmed.includes("login interrupted")
+  );
 }
 
 function isReferentialMessage(text: string): boolean {
@@ -70,12 +101,13 @@ function isMetaQualityAssistantMessage(text: string): boolean {
 function filterUserMessages(messages: SessionContext["messages"]): string[] {
   const all = messages
     .filter((m) => m.role === "user" && m.content)
-    .map((m) => m.content.trim());
+    .map((m) => m.content.trim())
+    .filter((msg) => !isNoiseMessage(msg));
   // Always keep first and last, filter noise from middle
   if (all.length <= 2) return all;
   const first = all[0];
   const last = all[all.length - 1];
-  const middle = all.slice(1, -1).filter((msg) => !isNoiseMessage(msg));
+  const middle = all.slice(1, -1);
   return [first, ...middle, last];
 }
 
@@ -125,14 +157,21 @@ function findFocusedWindow(messages: SessionContext["messages"]): {
   messages: SessionContext["messages"];
   sessionAppearsComplete: boolean;
 } {
+  return findFocusedWindowFrom(messages);
+}
+
+function findFocusedWindowFrom(
+  messages: SessionContext["messages"],
+  fromUserMessage?: number | null
+): {
+  messages: SessionContext["messages"];
+  sessionAppearsComplete: boolean;
+} {
   if (messages.length === 0) {
     return { messages, sessionAppearsComplete: false };
   }
 
-  const substantiveUserIndexes = messages
-    .map((message, index) => ({ message, index }))
-    .filter(({ message }) => message.role === "user" && message.content && !isNoiseMessage(message.content))
-    .map(({ index }) => index);
+  const substantiveUserIndexes = getSubstantiveUserIndexes(messages);
 
   if (substantiveUserIndexes.length === 0) {
     return { messages, sessionAppearsComplete: false };
@@ -145,7 +184,9 @@ function findFocusedWindow(messages: SessionContext["messages"]): {
 
   const postToolUsers = substantiveUserIndexes.filter((index) => index > lastToolIndex);
   let startIndex = 0;
-  if (postToolUsers.length > 0) {
+  if (typeof fromUserMessage === "number" && fromUserMessage > 0) {
+    startIndex = substantiveUserIndexes[Math.min(fromUserMessage - 1, substantiveUserIndexes.length - 1)] ?? 0;
+  } else if (postToolUsers.length > 0) {
     startIndex = postToolUsers[0];
   } else if (lastToolIndex >= 0) {
     startIndex = substantiveUserIndexes.filter((index) => index <= lastToolIndex).at(-1) ?? 0;
@@ -154,7 +195,11 @@ function findFocusedWindow(messages: SessionContext["messages"]): {
   }
 
   const startMessage = messages[startIndex];
-  if (startMessage?.role === "user" && isReferentialMessage(startMessage.content)) {
+  if (
+    (fromUserMessage === null || typeof fromUserMessage === "undefined") &&
+    startMessage?.role === "user" &&
+    isReferentialMessage(startMessage.content)
+  ) {
     const previousSubstantive = substantiveUserIndexes.filter((index) => index < startIndex).at(-1);
     if (typeof previousSubstantive === "number") {
       startIndex = previousSubstantive;
@@ -163,7 +208,16 @@ function findFocusedWindow(messages: SessionContext["messages"]): {
 
   const focused = messages.slice(startIndex);
   const hasToolActivity = focused.some((message) => message.role === "assistant" && message.toolCalls.length > 0);
-  const lastMessage = focused.at(-1);
+  const lastMessage = [...focused].reverse().find((message) => {
+    if (!message.content.trim() && message.toolCalls.length === 0) return false;
+    if (message.role === "assistant" && message.content.trim() && isAssistantNoiseMessage(message.content)) {
+      return false;
+    }
+    if (message.role === "user" && message.content.trim() && isNoiseMessage(message.content)) {
+      return false;
+    }
+    return true;
+  });
   const sessionAppearsComplete =
     Boolean(lastMessage) &&
     lastMessage!.role === "assistant" &&
@@ -171,6 +225,13 @@ function findFocusedWindow(messages: SessionContext["messages"]): {
     !hasToolActivity;
 
   return { messages: focused, sessionAppearsComplete };
+}
+
+export function listSubstantiveUserMessages(messages: SessionContext["messages"]): Array<{ index: number; text: string }> {
+  return getSubstantiveUserIndexes(messages).map((messageIndex, index) => ({
+    index: index + 1,
+    text: messages[messageIndex]?.content.trim() || "",
+  }));
 }
 
 function extractWorkSummary(messages: SessionContext["messages"]): {
@@ -207,7 +268,7 @@ function extractWorkSummary(messages: SessionContext["messages"]): {
 function extractLastAssistantAnswer(messages: SessionContext["messages"]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message.role === "assistant" && message.content.trim()) {
+    if (message.role === "assistant" && message.content.trim() && !isAssistantNoiseMessage(message.content)) {
       return compactText(message.content, 500);
     }
   }
@@ -217,8 +278,17 @@ function extractLastAssistantAnswer(messages: SessionContext["messages"]): strin
 function summarizeToolCall(toolCall: SessionContext["messages"][number]["toolCalls"][number]): string {
   const filePath = extractFilePath(toolCall.input);
   const command = extractCommand(toolCall.input);
+  const url = typeof toolCall.input.url === "string" ? toolCall.input.url : null;
+  const query = typeof toolCall.input.query === "string" ? toolCall.input.query : null;
+  const description =
+    typeof toolCall.input.description === "string" ? toolCall.input.description
+      : typeof toolCall.input.prompt === "string" ? toolCall.input.prompt
+        : null;
   if (filePath) return `${toolCall.tool} ${filePath}`;
   if (command) return `${toolCall.tool}: ${summarizeCommand(command)}`;
+  if (url) return `${toolCall.tool}: ${compactText(url, 120)}`;
+  if (description) return `${toolCall.tool}: ${compactText(description, 120)}`;
+  if (query) return `${toolCall.tool}: ${compactText(query, 120)}`;
   return toolCall.tool;
 }
 
@@ -226,6 +296,7 @@ function findLastActiveAssistant(messages: SessionContext["messages"]): SessionC
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     if (message.role !== "assistant") continue;
+    if (message.content.trim() && isAssistantNoiseMessage(message.content)) continue;
     if (message.content.trim() || message.toolCalls.length > 0) {
       return message;
     }
@@ -262,12 +333,14 @@ function buildRemainingWorkHints({
   work,
   focusFiles,
   recentCommands,
+  lastAssistantAnswer,
 }: {
   sessionAppearsComplete: boolean;
   errors: string[];
   work: { filesModified: string[]; commands: string[] };
   focusFiles: string[];
   recentCommands: string[];
+  lastAssistantAnswer: string | null;
 }): string[] {
   if (sessionAppearsComplete) return [];
 
@@ -286,6 +359,9 @@ function buildRemainingWorkHints({
   if (focusFiles.length > 0) {
     hints.push("Run `git diff --` on the active files to see the exact in-progress changes before editing further.");
   }
+  if (hints.length === 0 && lastAssistantAnswer) {
+    hints.push("Continue from the last meaningful assistant answer above. This session appears to have stalled after planning or approval, not after code changes.");
+  }
   if (hints.length === 0) {
     hints.push("Inspect the active files and run `git diff` to determine the next concrete implementation step.");
   }
@@ -297,23 +373,29 @@ function selectSessionHistoryMessages(
   allMessages: SessionContext["messages"],
   sessionAppearsComplete: boolean
 ): SessionContext["messages"] {
-  if (sessionAppearsComplete) return focusedMessages;
+  const sanitizeHistoryMessages = (messages: SessionContext["messages"]): SessionContext["messages"] =>
+    messages.filter((message) => {
+      if (message.role === "assistant" && message.content.trim() && isMetaQualityAssistantMessage(message.content)) {
+        return false;
+      }
+      if (message.role === "assistant" && message.content.trim() && isAssistantNoiseMessage(message.content)) {
+        return false;
+      }
+      if (message.role === "user" && message.content && isNoiseMessage(message.content)) {
+        return false;
+      }
+      return Boolean(message.content.trim()) || message.toolCalls.length > 0;
+    });
+
+  if (sessionAppearsComplete) return sanitizeHistoryMessages(focusedMessages);
 
   const hasAssistantActivity = focusedMessages.some(
     (message) => message.role === "assistant" && (message.content.trim() || message.toolCalls.length > 0)
   );
 
-  if (focusedMessages.length >= 3 && hasAssistantActivity) return focusedMessages;
+  if (focusedMessages.length >= 3 && hasAssistantActivity) return sanitizeHistoryMessages(focusedMessages);
 
-  const filtered = allMessages.filter((message) => {
-    if (message.role === "assistant" && message.content.trim() && isMetaQualityAssistantMessage(message.content)) {
-      return false;
-    }
-    if (message.role === "user" && message.content && isNoiseMessage(message.content)) {
-      return false;
-    }
-    return Boolean(message.content.trim()) || message.toolCalls.length > 0;
-  });
+  const filtered = sanitizeHistoryMessages(allMessages);
 
   return filtered.slice(-8);
 }
@@ -328,7 +410,10 @@ function buildSessionHistory(
     .map((message) => {
       const parts: string[] = [];
       if (message.content.trim()) {
-        if (message.role === "assistant" && isMetaQualityAssistantMessage(message.content)) {
+        if (
+          message.role === "assistant" &&
+          (isMetaQualityAssistantMessage(message.content) || isAssistantNoiseMessage(message.content))
+        ) {
           return null;
         }
         parts.push(compactText(message.content, 220));
@@ -379,8 +464,11 @@ function extractFocusFiles(ctx: SessionContext, work: { filesModified: string[] 
   ]).slice(0, 6);
 }
 
-export function buildRawPrompt(ctx: SessionContext, options: { target?: Target } = {}): string {
-  const focused = findFocusedWindow(ctx.messages);
+export function buildRawPrompt(
+  ctx: SessionContext,
+  options: { target?: Target; fromUserMessage?: number | null } = {}
+): string {
+  const focused = findFocusedWindowFrom(ctx.messages, options.fromUserMessage);
   const userMessages = filterUserMessages(focused.messages);
   const errors = extractUnresolvedErrors(focused.messages);
   const decisions = extractKeyDecisions(focused.messages);
@@ -395,6 +483,7 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
     work,
     focusFiles,
     recentCommands,
+    lastAssistantAnswer,
   });
   const sessionHistory = buildSessionHistory(focused.messages, ctx.messages, focused.sessionAppearsComplete);
 
@@ -547,7 +636,10 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
   return prompt;
 }
 
-export function buildRefinementDump(ctx: SessionContext, options: { target?: Target } = {}): string {
+export function buildRefinementDump(
+  ctx: SessionContext,
+  options: { target?: Target; fromUserMessage?: number | null } = {}
+): string {
   // Reuse the raw prompt — it's already well-structured and concise
   return buildRawPrompt(ctx, options);
 }

@@ -23,6 +23,8 @@ export function parseArgs(argv: string[]): ParsedOptions {
     refine: false,
     help: false,
     version: false,
+    pickUser: false,
+    fromUser: null,
     session: null,
     model: null,
     provider: "openrouter",
@@ -52,6 +54,12 @@ export function parseArgs(argv: string[]): ParsedOptions {
         break;
       case "--refine":
         options.refine = true;
+        break;
+      case "--pick-user":
+        options.pickUser = true;
+        break;
+      case "--from-user":
+        options.fromUser = Number(requireValue(arg, args));
         break;
       case "--session":
         options.session = requireValue(arg, args);
@@ -122,6 +130,10 @@ export function parseArgs(argv: string[]): ParsedOptions {
     throw new Error(`Invalid limit "${options.limit}". Expected a positive integer.`);
   }
 
+  if (options.fromUser !== null && (!Number.isInteger(options.fromUser) || options.fromUser <= 0)) {
+    throw new Error(`Invalid --from-user value "${options.fromUser}". Expected a positive integer.`);
+  }
+
   return options;
 }
 
@@ -143,6 +155,8 @@ export function getHelpText({ name, version }: PackageInfo): string {
     "  -o, --output <file>     Write the final prompt to a file",
     "      --source <name>     Session source: claude, codex, opencode (interactive if omitted)",
     "      --session <id|path> Use a specific session file or session id",
+    "      --pick-user         Interactively choose the starting user prompt for preserved context",
+    "      --from-user <n>     Start preserved context from the nth substantive user prompt",
     "      --target <name>     Prompt target: generic, claude, codex, cursor, chatgpt",
     "  -n, --limit <count>     Limit rows for the sessions command (default: 10)",
     "",
@@ -164,6 +178,8 @@ export function getHelpText({ name, version }: PackageInfo): string {
     `  ${name} --source codex --target claude`,
     `  ${name} --source codex --target codex`,
     `  ${name} --source opencode`,
+    `  ${name} --pick-user`,
+    `  ${name} --from-user 2`,
     `  ${name} --refine --model openrouter/free`,
     `  ${name} --output ./handoff.md`,
     `  ${name} doctor`,
