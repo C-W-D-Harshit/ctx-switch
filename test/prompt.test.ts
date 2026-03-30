@@ -144,12 +144,17 @@ test("buildRawPrompt keeps the active unfinished work thread and touched files",
 
   assert.doesNotMatch(prompt, /latest exchange in this session appears complete/i);
   assert.match(prompt, /Add Codex support using the latest session from the current project\./);
+  assert.match(prompt, /Session History/);
+  assert.match(prompt, /USER: Add Codex support using the latest session from the current project\./);
+  assert.match(prompt, /ASSISTANT: \[tools\] Read \/tmp\/project\/src\/session-codex\.ts/);
   assert.match(prompt, /\/tmp\/project\/src\/session-codex\.ts/);
   assert.match(prompt, /Recent Commands \/ Checks/);
   assert.match(prompt, /`npm test`/);
   assert.match(prompt, /Read These Files First/);
   assert.match(prompt, /Recent commits:/);
   assert.match(prompt, /The next agent is Codex\./);
+  assert.match(prompt, /Current Status/);
+  assert.match(prompt, /Likely Remaining Work/);
 });
 
 test("buildRawPrompt keeps the previous user ask when the latest message is referential", () => {
@@ -269,4 +274,45 @@ test("buildRawPrompt supports claude target guidance for codex handoff", () => {
   assert.match(prompt, /`npm test`/);
   assert.match(prompt, /Read These Files First/);
   assert.match(prompt, /`src\/prompt\.ts`/);
+  assert.match(prompt, /git status --short/);
+  assert.match(prompt, /git diff --stat/);
+  assert.match(prompt, /git diff -- src\/prompt\.ts test\/prompt\.test\.ts/);
+  assert.doesNotMatch(prompt, /\*\*Staged diff:\*\*/);
+  assert.doesNotMatch(prompt, /\*\*Unstaged diff:\*\*/);
+});
+
+test("buildRawPrompt includes a compact recent session history tail", () => {
+  const ctx = createBaseContext([
+    {
+      role: "user",
+      content: "Investigate the OpenCode handoff.",
+      toolCalls: [],
+      timestamp: "2026-03-01T10:00:00.000Z",
+    },
+    {
+      role: "assistant",
+      content: "I am inspecting the OpenCode parser.",
+      toolCalls: [
+        {
+          id: "1",
+          tool: "Bash",
+          input: { command: "sed -n '1,200p' src/session-opencode.ts" },
+        },
+      ],
+      timestamp: "2026-03-01T10:01:00.000Z",
+    },
+    {
+      role: "user",
+      content: "We likely need the session history in the handoff.",
+      toolCalls: [],
+      timestamp: "2026-03-01T10:02:00.000Z",
+    },
+  ]);
+
+  const prompt = buildRawPrompt(ctx);
+
+  assert.match(prompt, /Session History/);
+  assert.match(prompt, /USER: Investigate the OpenCode handoff\./);
+  assert.match(prompt, /ASSISTANT: I am inspecting the OpenCode parser\. \| \[tools\] Bash: sed -n '1,200p' src\/session-opencode\.ts/);
+  assert.match(prompt, /USER: We likely need the session history in the handoff\./);
 });

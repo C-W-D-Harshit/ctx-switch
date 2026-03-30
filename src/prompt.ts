@@ -26,7 +26,7 @@ function extractCommand(input: Record<string, unknown>): string | null {
 function buildTargetGuidance(target: Target | undefined): string {
   switch (target) {
     case "claude":
-      return "The next agent is Claude Code. It should read the active files first, trust the current workspace and git diff over stale transcript details, and continue the implementation or debugging directly.";
+      return "The next agent is Claude Code. It should read the active files first, inspect the current workspace with git commands, and continue the implementation or debugging directly.";
     case "codex":
       return "The next agent is Codex. It should inspect the current files first, avoid redoing completed work, and finish any remaining implementation or verification.";
     case "cursor":
@@ -34,7 +34,7 @@ function buildTargetGuidance(target: Target | undefined): string {
     case "chatgpt":
       return "The next agent is ChatGPT. It should reason from the current workspace state, explain what remains, and provide explicit next actions.";
     default:
-      return "The next agent should read the active files first, trust the current workspace and git diff over stale transcript details, continue the interrupted work directly, and avoid redoing completed steps.";
+      return "The next agent should read the active files first, inspect the current workspace with git commands, continue the interrupted work directly, and avoid redoing completed steps.";
   }
 }
 
@@ -60,6 +60,11 @@ function isReferentialMessage(text: string): boolean {
   if (!normalized || normalized.length > 220) return false;
   return /^(ok|okay|alright|now|so)\b/.test(normalized) ||
     /\b(it|that|again|better|same|continue|still|also|another|more)\b/.test(normalized);
+}
+
+function isMetaQualityAssistantMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /\b(handoff|prompt)\b/.test(lower) && /\b(good|bad|better|worse|quality)\b/.test(lower);
 }
 
 function filterUserMessages(messages: SessionContext["messages"]): string[] {
@@ -101,10 +106,10 @@ function extractKeyDecisions(messages: SessionContext["messages"]): string[] {
   const decisions: string[] = [];
   for (const msg of messages) {
     if (msg.role !== "assistant" || !msg.content) continue;
-    const lower = msg.content.toLowerCase();
-    if (/\b(handoff|prompt)\b/.test(lower) && /\b(good|bad|better|worse|quality)\b/.test(lower)) {
+    if (isMetaQualityAssistantMessage(msg.content)) {
       continue;
     }
+    const lower = msg.content.toLowerCase();
     if (
       /\b(root cause|the issue is|the problem is|caused by|failed because|failing because|need to)\b/.test(lower) ||
       /\b(exposed|revealed|showed)\b.*\b(gap|issue|problem|bug)\b/.test(lower) ||
@@ -209,6 +214,137 @@ function extractLastAssistantAnswer(messages: SessionContext["messages"]): strin
   return null;
 }
 
+function summarizeToolCall(toolCall: SessionContext["messages"][number]["toolCalls"][number]): string {
+  const filePath = extractFilePath(toolCall.input);
+  const command = extractCommand(toolCall.input);
+  if (filePath) return `${toolCall.tool} ${filePath}`;
+  if (command) return `${toolCall.tool}: ${summarizeCommand(command)}`;
+  return toolCall.tool;
+}
+
+function findLastActiveAssistant(messages: SessionContext["messages"]): SessionContext["messages"][number] | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== "assistant") continue;
+    if (message.content.trim() || message.toolCalls.length > 0) {
+      return message;
+    }
+  }
+  return null;
+}
+
+function buildCurrentStatus(messages: SessionContext["messages"], errors: string[], sessionAppearsComplete: boolean): {
+  status: string;
+  lastStep: string | null;
+  lastToolActions: string[];
+} {
+  const lastAssistant = findLastActiveAssistant(messages);
+  const lastStep = lastAssistant?.content?.trim() ? compactText(lastAssistant.content, 400) : null;
+  const lastToolActions = lastAssistant ? lastAssistant.toolCalls.slice(-4).map(summarizeToolCall) : [];
+
+  let status = "In progress";
+  if (sessionAppearsComplete) {
+    status = "Latest exchange complete";
+  } else if (errors.length > 0) {
+    status = "Blocked by unresolved errors";
+  } else if (lastAssistant?.toolCalls.length) {
+    status = "Mid-task after recent tool activity";
+  } else if (lastAssistant?.content.trim()) {
+    status = "Awaiting the next concrete action";
+  }
+
+  return { status, lastStep, lastToolActions };
+}
+
+function buildRemainingWorkHints({
+  sessionAppearsComplete,
+  errors,
+  work,
+  focusFiles,
+  recentCommands,
+}: {
+  sessionAppearsComplete: boolean;
+  errors: string[];
+  work: { filesModified: string[]; commands: string[] };
+  focusFiles: string[];
+  recentCommands: string[];
+}): string[] {
+  if (sessionAppearsComplete) return [];
+
+  const hints: string[] = [];
+  if (errors.length > 0) {
+    hints.push("Resolve the unresolved errors above before extending the implementation.");
+  }
+  if (work.filesModified.length > 0) {
+    hints.push(`Inspect the in-progress changes in ${work.filesModified.map((filePath) => `\`${filePath}\``).join(", ")} and decide what still needs to be finished or verified.`);
+  } else if (focusFiles.length > 0) {
+    hints.push(`Start by reading ${focusFiles.map((filePath) => `\`${filePath}\``).join(", ")} to reconstruct the current working set.`);
+  }
+  if (recentCommands.length > 0) {
+    hints.push("Rerun or extend the recent checks to confirm the current state before making further changes.");
+  }
+  if (focusFiles.length > 0) {
+    hints.push("Run `git diff --` on the active files to see the exact in-progress changes before editing further.");
+  }
+  if (hints.length === 0) {
+    hints.push("Inspect the active files and run `git diff` to determine the next concrete implementation step.");
+  }
+  return hints;
+}
+
+function selectSessionHistoryMessages(
+  focusedMessages: SessionContext["messages"],
+  allMessages: SessionContext["messages"],
+  sessionAppearsComplete: boolean
+): SessionContext["messages"] {
+  if (sessionAppearsComplete) return focusedMessages;
+
+  const hasAssistantActivity = focusedMessages.some(
+    (message) => message.role === "assistant" && (message.content.trim() || message.toolCalls.length > 0)
+  );
+
+  if (focusedMessages.length >= 3 && hasAssistantActivity) return focusedMessages;
+
+  const filtered = allMessages.filter((message) => {
+    if (message.role === "assistant" && message.content.trim() && isMetaQualityAssistantMessage(message.content)) {
+      return false;
+    }
+    if (message.role === "user" && message.content && isNoiseMessage(message.content)) {
+      return false;
+    }
+    return Boolean(message.content.trim()) || message.toolCalls.length > 0;
+  });
+
+  return filtered.slice(-8);
+}
+
+function buildSessionHistory(
+  focusedMessages: SessionContext["messages"],
+  allMessages: SessionContext["messages"],
+  sessionAppearsComplete: boolean
+): string[] {
+  const historyMessages = selectSessionHistoryMessages(focusedMessages, allMessages, sessionAppearsComplete);
+  const entries = historyMessages
+    .map((message) => {
+      const parts: string[] = [];
+      if (message.content.trim()) {
+        if (message.role === "assistant" && isMetaQualityAssistantMessage(message.content)) {
+          return null;
+        }
+        parts.push(compactText(message.content, 220));
+      }
+      if (message.role === "assistant" && message.toolCalls.length > 0) {
+        parts.push(`[tools] ${message.toolCalls.slice(-4).map(summarizeToolCall).join(", ")}`);
+      }
+      if (parts.length === 0) return null;
+      return `${message.role.toUpperCase()}: ${parts.join(" | ")}`;
+    })
+    .filter((entry): entry is string => Boolean(entry));
+
+  if (entries.length <= 8) return entries;
+  return [entries[0], "...", ...entries.slice(-6)];
+}
+
 function summarizeCommand(command: string): string {
   return compactText(command.replace(/\s+/g, " ").trim(), 140);
 }
@@ -252,6 +388,15 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
   const focusFiles = extractFocusFiles(ctx, work);
   const recentCommands = extractRecentCommands(work.commands);
   const lastAssistantAnswer = extractLastAssistantAnswer(focused.messages);
+  const currentStatus = buildCurrentStatus(focused.messages, errors, focused.sessionAppearsComplete);
+  const remainingWorkHints = buildRemainingWorkHints({
+    sessionAppearsComplete: focused.sessionAppearsComplete,
+    errors,
+    work,
+    focusFiles,
+    recentCommands,
+  });
+  const sessionHistory = buildSessionHistory(focused.messages, ctx.messages, focused.sessionAppearsComplete);
 
   let prompt = "";
 
@@ -276,6 +421,24 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
   if (focused.sessionAppearsComplete && lastAssistantAnswer) {
     prompt += "## Last Answer Already Given\n\n";
     prompt += `- ${lastAssistantAnswer}\n\n`;
+  }
+
+  prompt += "## Current Status\n\n";
+  prompt += `- Status: ${currentStatus.status}\n`;
+  if (currentStatus.lastStep) {
+    prompt += `- Last active step: ${currentStatus.lastStep}\n`;
+  }
+  if (currentStatus.lastToolActions.length > 0) {
+    prompt += `- Last tool actions: ${currentStatus.lastToolActions.join(", ")}\n`;
+  }
+  prompt += "\n";
+
+  if (sessionHistory.length > 0) {
+    prompt += "## Session History\n\n";
+    for (const entry of sessionHistory) {
+      prompt += `- ${entry}\n`;
+    }
+    prompt += "\n";
   }
 
   // — SECTION 2: What to avoid —
@@ -334,18 +497,20 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
     prompt += "\n";
   }
 
+  if (remainingWorkHints.length > 0) {
+    prompt += "## Likely Remaining Work\n\n";
+    for (const hint of remainingWorkHints) {
+      prompt += `- ${hint}\n`;
+    }
+    prompt += "\n";
+  }
+
   // — SECTION 4: Current state —
   const git = ctx.gitContext;
   if (git.isGitRepo && git.hasChanges) {
     prompt += "## Uncommitted Changes\n\n";
     if (git.status) {
       prompt += "```\n" + git.status + "\n```\n\n";
-    }
-    if (git.staged.diff) {
-      prompt += "**Staged diff:**\n```diff\n" + git.staged.diff + "\n```\n\n";
-    }
-    if (git.unstaged.diff) {
-      prompt += "**Unstaged diff:**\n```diff\n" + git.unstaged.diff + "\n```\n\n";
     }
     if (git.untracked.length > 0) {
       const shown = git.untracked.slice(0, 6);
@@ -373,9 +538,10 @@ export function buildRawPrompt(ctx: SessionContext, options: { target?: Target }
     if (errors.length > 0) {
       prompt += "2. **Check the errors above** — do NOT repeat failed approaches. Try a different strategy.\n";
     }
-    prompt += `${errors.length > 0 ? "3" : "2"}. **Identify what's done vs what remains** — use the recent commands, active files, and git state above as the source of truth for the current thread.\n`;
-    prompt += `${errors.length > 0 ? "4" : "3"}. **Do the remaining work** — pick up exactly where the previous agent stopped.\n`;
-    prompt += `${errors.length > 0 ? "5" : "4"}. **Verify** — rerun or extend the relevant commands/checks above to confirm everything works.\n`;
+    prompt += `${errors.length > 0 ? "3" : "2"}. **Inspect the workspace state explicitly** — run \`git status --short\`, \`git diff --stat\`, and \`git diff -- ${focusFiles.length > 0 ? focusFiles.slice(0, 4).join(" ") : "."}\` before changing code.\n`;
+    prompt += `${errors.length > 0 ? "4" : "3"}. **Identify what's done vs what remains** — use the Current Status, Session History, Likely Remaining Work, recent commands, active files, and git state above as the source of truth for the current thread.\n`;
+    prompt += `${errors.length > 0 ? "5" : "4"}. **Continue from the last active step** — if the stop point is still ambiguous, inspect the read-first files and rerun the recent commands before changing code.\n`;
+    prompt += `${errors.length > 0 ? "6" : "5"}. **Verify** — rerun or extend the relevant commands/checks above to confirm everything works.\n`;
   }
 
   return prompt;

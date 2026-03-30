@@ -82,6 +82,32 @@ function extractParsedCommands(input: Record<string, unknown>): Array<Record<str
   return parsed.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object");
 }
 
+function tokenizeShellCommand(command: string): string[] {
+  const matches = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+}
+
+function looksLikeFilePath(token: string): boolean {
+  if (!token || token.startsWith("-")) return false;
+  if (/[|<>;$()]/.test(token)) return false;
+  return token.includes("/") || token.includes(".");
+}
+
+function extractReadPathsFromCommand(command: string, cwd: string): string[] {
+  const tokens = tokenizeShellCommand(command.trim());
+  if (tokens.length === 0) return [];
+
+  const base = path.basename(tokens[0]);
+  const readCommands = new Set(["cat", "head", "tail", "sed", "nl", "wc"]);
+  if (!readCommands.has(base)) return [];
+
+  return tokens
+    .slice(1)
+    .filter((token) => looksLikeFilePath(token))
+    .filter((token) => !/^\d+(,\d+)?p?$/.test(token))
+    .map((token) => resolveSessionFilePath(token, cwd));
+}
+
 export function buildSessionContext({
   messages,
   meta,
@@ -108,6 +134,7 @@ export function buildSessionContext({
         const command = extractCommand(toolCall.input);
         const patchPaths = extractPatchFilePaths(toolCall.input, cwd);
         const parsedCommands = extractParsedCommands(toolCall.input);
+        const commandReadPaths = command ? extractReadPathsFromCommand(command, cwd) : [];
 
         if (filePath && /(edit|write|create|multi_edit)/.test(toolName)) {
           filesModified.add(resolveSessionFilePath(filePath, cwd));
@@ -122,6 +149,10 @@ export function buildSessionContext({
         for (const parsedCommand of parsedCommands) {
           if (parsedCommand.type !== "read" || typeof parsedCommand.path !== "string") continue;
           filesRead.add(resolveSessionFilePath(parsedCommand.path, cwd));
+        }
+
+        for (const readPath of commandReadPaths) {
+          filesRead.add(readPath);
         }
 
         if (command && /(bash|command|run|exec_command)/.test(toolName)) {

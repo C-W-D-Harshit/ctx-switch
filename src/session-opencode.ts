@@ -5,7 +5,11 @@ import type { SessionMessage, SessionMeta, SessionRecord, ToolCall } from "./typ
 
 export const OPENCODE_DB_PATH = path.join(os.homedir(), ".local", "share", "opencode", "opencode.db");
 
-function runSqlite(query: string, dbPath: string = OPENCODE_DB_PATH): { ok: boolean; stdout: string } {
+function getOpenCodeDbPath(): string {
+  return process.env.CTX_SWITCH_OPENCODE_DB_PATH || OPENCODE_DB_PATH;
+}
+
+function runSqlite(query: string, dbPath: string = getOpenCodeDbPath()): { ok: boolean; stdout: string } {
   try {
     const stdout = execFileSync("sqlite3", ["-json", dbPath, query], {
       encoding: "utf8",
@@ -83,11 +87,48 @@ interface OpenCodePartData {
     status?: string;
     input?: Record<string, unknown>;
     output?: string;
+    metadata?: Record<string, unknown>;
   };
   time?: { start?: number; end?: number };
 }
 
+function detectToolError(tool: string, status: string | undefined, output: string): boolean | undefined {
+  if (status === "error") return true;
+  if (!output) return undefined;
+
+  if (/Process exited with code [1-9]\d*/.test(output)) return true;
+  if (/^npm ERR!/m.test(output)) return true;
+  if (/^(Error|TypeError|ReferenceError|SyntaxError):/m.test(output)) return true;
+  if (/^(bash|sh|zsh):/m.test(output)) return true;
+
+  // Avoid treating file contents like `OpenRouterErrorDetails` as tool failures.
+  if (tool === "read" || tool === "glob" || tool === "grep") return undefined;
+
+  return undefined;
+}
+
+function extractDelegatedSessionId(part: OpenCodePartData): string | null {
+  const metadataSessionId = part.state?.metadata?.sessionId;
+  if (typeof metadataSessionId === "string" && metadataSessionId.trim()) {
+    return metadataSessionId.trim();
+  }
+
+  const output = part.state?.output;
+  if (typeof output !== "string") return null;
+
+  const match = output.match(/\btask_id:\s*(ses_[^\s)]+)/);
+  return match?.[1] || null;
+}
+
 export function parseSession(sessionId: string): { messages: SessionMessage[]; meta: SessionMeta } {
+  return parseSessionInternal(sessionId, new Set());
+}
+
+function parseSessionInternal(
+  sessionId: string,
+  seenSessions: Set<string>
+): { messages: SessionMessage[]; meta: SessionMeta } {
+  seenSessions.add(sessionId);
   const messages: SessionMessage[] = [];
   const meta: SessionMeta = {
     cwd: null,
@@ -133,6 +174,7 @@ export function parseSession(sessionId: string): { messages: SessionMessage[]; m
 
     const textParts: string[] = [];
     const toolCalls: ToolCall[] = [];
+    const delegatedAssistantMessages: SessionMessage[] = [];
 
     for (const partRow of partRows) {
       let part: OpenCodePartData;
@@ -147,12 +189,19 @@ export function parseSession(sessionId: string): { messages: SessionMessage[]; m
       } else if (part.type === "tool" && part.tool) {
         const input = part.state?.input || {};
         const output = part.state?.output || "";
-        const isError = part.state?.status === "error" ||
-                        /error|Error|ERROR/.test(output.slice(0, 200));
+        const isError = detectToolError(part.tool, part.state?.status, output);
 
         // Normalize tool names to match Claude's conventions
         const toolName = normalizeToolName(part.tool);
         const normalizedInput = normalizeInput(part.tool, input);
+        if (toolName === "task") {
+          const delegatedSessionId = extractDelegatedSessionId(part);
+          if (delegatedSessionId && !seenSessions.has(delegatedSessionId)) {
+            normalizedInput.delegated_session_id = delegatedSessionId;
+            const delegated = parseSessionInternal(delegatedSessionId, seenSessions);
+            delegatedAssistantMessages.push(...delegated.messages.filter((message) => message.role === "assistant"));
+          }
+        }
 
         toolCalls.push({
           id: part.callID || null,
@@ -173,6 +222,10 @@ export function parseSession(sessionId: string): { messages: SessionMessage[]; m
       toolCalls,
       timestamp: null,
     });
+
+    if (role === "assistant" && delegatedAssistantMessages.length > 0) {
+      messages.push(...delegatedAssistantMessages);
+    }
   }
 
   return { messages, meta };
@@ -181,6 +234,7 @@ export function parseSession(sessionId: string): { messages: SessionMessage[]; m
 function normalizeToolName(tool: string): string {
   // Map OpenCode tool names to familiar conventions
   const mapping: Record<string, string> = {
+    apply_patch: "apply_patch",
     read: "read",
     edit: "edit",
     write: "write",
@@ -198,8 +252,15 @@ function normalizeToolName(tool: string): string {
 
 function normalizeInput(tool: string, input: Record<string, unknown>): Record<string, unknown> {
   // Normalize input keys to match what buildSessionContext expects
-  if (input.filePath && !input.file_path) {
-    return { ...input, file_path: input.filePath };
+  const normalized: Record<string, unknown> = { ...input };
+
+  if (normalized.filePath && !normalized.file_path) {
+    normalized.file_path = normalized.filePath;
   }
-  return input;
+
+  if (tool === "apply_patch" && typeof normalized.patchText === "string" && !normalized.patch) {
+    normalized.patch = normalized.patchText;
+  }
+
+  return normalized;
 }
